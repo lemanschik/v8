@@ -1,6 +1,8 @@
 # Development Instructions
 
-
+## Expected Requirements
+40+ GB Disk Space is highly Recommended the resulting minimum image is 3.9 gb at present. 
+It is not Optimized like squash fs did not run over it but that could maybe improve the build.
 
 ## Porting over from gclient
 We Do not need to replicate the logic it does we only need to understand the result of its
