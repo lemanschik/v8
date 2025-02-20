@@ -125,13 +125,13 @@ class CodeEntry {
   }
 
   // Returns the start address of the instruction segment represented by this
-  // CodeEntry. Used as a key in the containing CodeMap.
+  // CodeEntry. Used as a key in the containing InstructionStreamMap.
   Address instruction_start() const { return instruction_start_; }
   void set_instruction_start(Address address) { instruction_start_ = address; }
 
   Address** heap_object_location_address() { return &heap_object_location_; }
 
-  void FillFunctionInfo(SharedFunctionInfo shared);
+  void FillFunctionInfo(Tagged<SharedFunctionInfo> shared);
 
   void SetBuiltinId(Builtin id);
   Builtin builtin() const { return BuiltinField::decode(bit_field_); }
@@ -141,7 +141,7 @@ class CodeEntry {
   }
 
   // Returns whether or not the lifetime of this CodeEntry is reference
-  // counted, and managed by a CodeMap.
+  // counted, and managed by an InstructionStreamMap.
   bool is_ref_counted() const { return RefCountedField::decode(bit_field_); }
 
   uint32_t GetHash() const;
@@ -414,6 +414,7 @@ class CpuProfile {
     int line;
     StateTag state_tag;
     EmbedderStateTag embedder_state_tag;
+    const std::optional<uint64_t> trace_id;
   };
 
   V8_EXPORT_PRIVATE CpuProfile(
@@ -430,7 +431,8 @@ class CpuProfile {
   void AddPath(base::TimeTicks timestamp, const ProfileStackTrace& path,
                int src_line, bool update_stats,
                base::TimeDelta sampling_interval, StateTag state,
-               EmbedderStateTag embedder_state);
+               EmbedderStateTag embedder_state,
+               const std::optional<uint64_t> trace_id = std::nullopt);
   void FinishProfile();
 
   const char* title() const { return title_; }
@@ -484,18 +486,18 @@ class CpuProfileMaxSamplesCallbackTask : public v8::Task {
   std::unique_ptr<DiscardedSamplesDelegate> delegate_;
 };
 
-class V8_EXPORT_PRIVATE CodeMap {
+class V8_EXPORT_PRIVATE InstructionStreamMap {
  public:
-  explicit CodeMap(CodeEntryStorage& storage);
-  ~CodeMap();
-  CodeMap(const CodeMap&) = delete;
-  CodeMap& operator=(const CodeMap&) = delete;
+  explicit InstructionStreamMap(CodeEntryStorage& storage);
+  ~InstructionStreamMap();
+  InstructionStreamMap(const InstructionStreamMap&) = delete;
+  InstructionStreamMap& operator=(const InstructionStreamMap&) = delete;
 
-  // Adds the given CodeEntry to the CodeMap. The CodeMap takes ownership of
-  // the CodeEntry.
+  // Adds the given CodeEntry to the InstructionStreamMap. The
+  // InstructionStreamMap takes ownership of the CodeEntry.
   void AddCode(Address addr, CodeEntry* entry, unsigned size);
   void MoveCode(Address from, Address to);
-  // Attempts to remove the given CodeEntry from the CodeMap.
+  // Attempts to remove the given CodeEntry from the InstructionStreamMap.
   // Returns true iff the entry was found and removed.
   bool RemoveCode(CodeEntry*);
   void ClearCodesInRange(Address start, Address end);
@@ -559,7 +561,9 @@ class V8_EXPORT_PRIVATE CpuProfilesCollection {
   std::vector<std::unique_ptr<CpuProfile>>* profiles() {
     return &finished_profiles_;
   }
-  const char* GetName(Name name) { return resource_names_.GetName(name); }
+  const char* GetName(Tagged<Name> name) {
+    return resource_names_.GetName(name);
+  }
   void RemoveProfile(CpuProfile* profile);
 
   // Finds a common sampling interval dividing each CpuProfile's interval,
@@ -573,7 +577,8 @@ class V8_EXPORT_PRIVATE CpuProfilesCollection {
       bool update_stats, base::TimeDelta sampling_interval, StateTag state,
       EmbedderStateTag embedder_state_tag,
       Address native_context_address = kNullAddress,
-      Address native_embedder_context_address = kNullAddress);
+      Address native_embedder_context_address = kNullAddress,
+      const std::optional<uint64_t> trace_id = std::nullopt);
 
   // Called from profile generator thread.
   void UpdateNativeContextAddressForCurrentProfiles(Address from, Address to);

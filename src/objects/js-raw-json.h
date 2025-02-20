@@ -17,17 +17,22 @@ namespace internal {
 
 class JSRawJson : public TorqueGeneratedJSRawJson<JSRawJson, JSObject> {
  public:
-  // Layout description.
-#define JS_RAW_JSON_FIELDS(V)    \
-  V(kRawJsonOffset, kTaggedSize) \
-  /* Total size. */              \
-  V(kSize, 0)
+  // Initial layout description.
+#define JS_RAW_JSON_FIELDS(V)           \
+  V(kRawJsonInitialOffset, kTaggedSize) \
+  /* Total size. */                     \
+  V(kInitialSize, 0)
   DEFINE_FIELD_OFFSET_CONSTANTS(JSObject::kHeaderSize, JS_RAW_JSON_FIELDS)
 #undef JS_RAW_JSON_FIELDS
 
-  static const int kRawJsonIndex = 0;
+  // Index only valid to use if HasInitialLayout() returns true.
+  static const int kRawJsonInitialIndex = 0;
 
-  V8_WARN_UNUSED_RESULT static MaybeHandle<JSRawJson> Create(
+  // Returns whether this raw JSON object has the initial layout and the
+  // "rawJSON" property can be directly accessed using kRawJsonInitialIndex.
+  inline bool HasInitialLayout(Isolate* isolate) const;
+
+  V8_WARN_UNUSED_RESULT static MaybeDirectHandle<JSRawJson> Create(
       Isolate* isolate, Handle<Object> text);
 
   DECL_PRINTER(JSRawJson)

@@ -69,6 +69,13 @@ ASSERT_TRIVIALLY_COPYABLE(Register);
 static_assert(sizeof(Register) <= sizeof(int),
               "Register can efficiently be passed by value");
 
+// Assign |source| value to |no_reg| and return the |source|'s previous value.
+inline Register ReassignRegister(Register& source) {
+  Register result = source;
+  source = Register::no_reg();
+  return result;
+}
+
 #define DEFINE_REGISTER(R) \
   constexpr Register R = Register::from_code(kRegCode_##R);
 GENERAL_REGISTERS(DEFINE_REGISTER)
@@ -131,20 +138,18 @@ constexpr Register kJavaScriptCallArgCountRegister = eax;
 constexpr Register kJavaScriptCallCodeStartRegister = ecx;
 constexpr Register kJavaScriptCallTargetRegister = kJSFunctionRegister;
 constexpr Register kJavaScriptCallNewTargetRegister = edx;
+// DispatchHandle is only needed for the sandbox which is not available on Ia32.
+constexpr Register kJavaScriptCallDispatchHandleRegister = no_reg;
 
 // The ExtraArg1Register not part of the real JS calling convention and is
 // mostly there to simplify consistent interface descriptor definitions across
 // platforms. Note that on ia32 it aliases kJavaScriptCallCodeStartRegister.
 constexpr Register kJavaScriptCallExtraArg1Register = ecx;
 
-// The off-heap trampoline does not need a register on ia32 (it uses a
-// pc-relative call instead).
-constexpr Register kOffHeapTrampolineRegister = no_reg;
-
 constexpr Register kRuntimeCallFunctionRegister = edx;
 constexpr Register kRuntimeCallArgCountRegister = eax;
 constexpr Register kRuntimeCallArgvRegister = ecx;
-constexpr Register kWasmInstanceRegister = esi;
+constexpr Register kWasmImplicitArgRegister = esi;
 constexpr Register kWasmCompileLazyFuncIndexRegister = edi;
 
 constexpr Register kRootRegister = ebx;

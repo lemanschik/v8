@@ -9,8 +9,8 @@
 #include "src/objects/objects.h"
 
 // These instance types do not exist for actual use but are merely introduced
-// for object stats tracing. In contrast to Code and FixedArray sub types
-// these types are not known to other counters outside of object stats
+// for object stats tracing. In contrast to InstructionStream and FixedArray sub
+// types these types are not known to other counters outside of object stats
 // tracing.
 //
 // Update LAST_VIRTUAL_TYPE below when changing this macro.
@@ -70,7 +70,7 @@
   V(RELOC_INFO_TYPE)                             \
   V(RETAINED_MAPS_TYPE)                          \
   V(SCRIPT_LIST_TYPE)                            \
-  V(SCRIPT_SHARED_FUNCTION_INFOS_TYPE)           \
+  V(SCRIPT_INFOS_TYPE)                           \
   V(SCRIPT_SOURCE_EXTERNAL_ONE_BYTE_TYPE)        \
   V(SCRIPT_SOURCE_EXTERNAL_TWO_BYTE_TYPE)        \
   V(SCRIPT_SOURCE_NON_EXTERNAL_ONE_BYTE_TYPE)    \
@@ -97,7 +97,7 @@ class ObjectStats {
   explicit ObjectStats(Heap* heap) : heap_(heap) { ClearObjectStats(true); }
 
   // See description on VIRTUAL_INSTANCE_TYPE_LIST.
-  enum VirtualInstanceType {
+  enum class VirtualInstanceType {
 #define DEFINE_VIRTUAL_INSTANCE_TYPE(type) type,
     VIRTUAL_INSTANCE_TYPE_LIST(DEFINE_VIRTUAL_INSTANCE_TYPE)
 #undef DEFINE_FIXED_ARRAY_SUB_INSTANCE_TYPE
@@ -109,7 +109,8 @@ class ObjectStats {
   // another.
   static constexpr int FIRST_VIRTUAL_TYPE = LAST_TYPE + 1;
   static constexpr int OBJECT_STATS_COUNT =
-      FIRST_VIRTUAL_TYPE + LAST_VIRTUAL_TYPE + 1;
+      FIRST_VIRTUAL_TYPE +
+      static_cast<int>(VirtualInstanceType::LAST_VIRTUAL_TYPE) + 1;
 
   void ClearObjectStats(bool clear_last_time_stats = false);
 

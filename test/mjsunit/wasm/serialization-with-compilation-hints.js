@@ -3,13 +3,9 @@
 // found in the LICENSE file.
 
 // Flags: --allow-natives-syntax --wasm-dynamic-tiering --liftoff
-// Flags: --no-wasm-native-module-cache-enabled
+// Flags: --no-wasm-native-module-cache
 // Make the test faster:
 // Flags: --wasm-tiering-budget=1000
-
-// This test busy-waits for tier-up to be complete, hence it does not work in
-// predictable mode where we only have a single thread.
-// Flags: --no-predictable
 
 d8.file.execute('test/mjsunit/wasm/wasm-module-builder.js');
 
@@ -31,10 +27,7 @@ const wire_bytes = create_builder().toBuffer();
 function serializeModule() {
   const module = new WebAssembly.Module(wire_bytes);
   let instance = new WebAssembly.Instance(module, {foo: {bar: () => 1}});
-  // Execute {f1} until it gets tiered up.
-  while (!%IsTurboFanFunction(instance.exports.f1)) {
-    instance.exports.f1();
-  }
+  %WasmTierUpFunction(instance.exports.f1);
   // Execute {f2} once, so that the module knows that this is a used function.
   instance.exports.f2();
   const buff = %SerializeWasmModule(module);
@@ -50,7 +43,8 @@ const serialized_module = serializeModule();
   const instance = new WebAssembly.Instance(module, {foo: {bar: () => 1}});
 
   assertTrue(%IsTurboFanFunction(instance.exports.f1));
-  assertTrue(%IsLiftoffFunction(instance.exports.f2));
+  // Busy-wait for `f2` to be compiled with Liftoff.
+  while (!%IsLiftoffFunction(instance.exports.f2)) {}
   assertTrue(
       !%IsLiftoffFunction(instance.exports.f0) &&
       !%IsTurboFanFunction(instance.exports.f0));

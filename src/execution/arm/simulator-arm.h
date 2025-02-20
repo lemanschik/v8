@@ -7,7 +7,7 @@
 // regular desktop machines.
 // V8 calls into generated code by using the GeneratedCode class,
 // which will start execution in the Simulator or forwards to the real entry
-// on a ARM HW platform.
+// on an ARM HW platform.
 
 #ifndef V8_EXECUTION_ARM_SIMULATOR_ARM_H_
 #define V8_EXECUTION_ARM_SIMULATOR_ARM_H_
@@ -78,6 +78,7 @@ class Simulator : public SimulatorBase {
     r15,
     num_registers,
     fp = 11,
+    ip = 12,
     sp = 13,
     lr = 14,
     pc = 15,
@@ -232,8 +233,13 @@ class Simulator : public SimulatorBase {
 
   Address get_sp() const { return static_cast<Address>(get_register(sp)); }
 
-  // Accessor to the internal simulator stack area.
+  // Accessor to the internal simulator stack area. Adds a safety
+  // margin to prevent overflows (kAdditionalStackMargin).
   uintptr_t StackLimit(uintptr_t c_limit) const;
+
+  // Return central stack view, without additional safety margins.
+  // Users, for example wasm::StackMemory, can add their own.
+  base::Vector<uint8_t> GetCentralStackView() const;
 
   // Executes ARM instructions until the PC reaches end_sim_pc.
   void Execute();
@@ -250,10 +256,10 @@ class Simulator : public SimulatorBase {
   }
 
   // Push an address onto the JS stack.
-  uintptr_t PushAddress(uintptr_t address);
+  V8_EXPORT_PRIVATE uintptr_t PushAddress(uintptr_t address);
 
   // Pop an address from the JS stack.
-  uintptr_t PopAddress();
+  V8_EXPORT_PRIVATE uintptr_t PopAddress();
 
   // Debugger input.
   void set_last_debugger_input(ArrayUniquePtr<char> input) {
@@ -281,6 +287,11 @@ class Simulator : public SimulatorBase {
     return false;
 #endif
   }
+
+  // Manage instruction tracing.
+  bool InstructionTracingEnabled();
+
+  void ToggleInstructionTracing();
 
  private:
   enum special_values {
@@ -334,6 +345,10 @@ class Simulator : public SimulatorBase {
   void HandleVList(Instruction* inst);
   void SoftwareInterrupt(Instruction* instr);
   void DebugAtNextPC();
+
+  // Take a copy of v8 simulator tracing flag because flags are frozen after
+  // start.
+  bool instruction_tracing_ = v8_flags.trace_sim;
 
   // Helper to write back values to register.
   void AdvancedSIMDElementOrStructureLoadStoreWriteback(int Rn, int Rm,
@@ -465,8 +480,15 @@ class Simulator : public SimulatorBase {
   bool underflow_vfp_flag_;
   bool inexact_vfp_flag_;
 
-  // Simulator support.
-  char* stack_;
+  // Simulator support for the stack.
+  uint8_t* stack_;
+  static const size_t kAllocatedStackSize = 1 * MB;
+  // We leave a small buffer below the usable stack to protect against potential
+  // stack underflows.
+  static const int kStackMargin = 64;
+  // Added in Simulator::StackLimit()
+  static const int kAdditionalStackMargin = 4 * KB;
+  static const size_t kUsableStackSize = kAllocatedStackSize - kStackMargin;
   bool pc_modified_;
   int icount_;
 
@@ -537,6 +559,18 @@ class Simulator : public SimulatorBase {
 
   class GlobalMonitor {
    public:
+    class SimulatorMutex final {
+     public:
+      explicit SimulatorMutex(GlobalMonitor* global_monitor) {
+        if (!global_monitor->IsSingleThreaded()) {
+          guard.emplace(global_monitor->mutex_);
+        }
+      }
+
+     private:
+      std::optional<base::MutexGuard> guard;
+    };
+
     class Processor {
      public:
       Processor();
@@ -562,31 +596,32 @@ class Simulator : public SimulatorBase {
       int failure_counter_;
     };
 
-    // Exposed so it can be accessed by Simulator::{Read,Write}Ex*.
-    base::Mutex mutex;
-
     void NotifyLoadExcl_Locked(int32_t addr, Processor* processor);
     void NotifyStore_Locked(int32_t addr, Processor* processor);
     bool NotifyStoreExcl_Locked(int32_t addr, Processor* processor);
 
+    // Called when the simulator is constructed.
+    void PrependProcessor(Processor* processor);
     // Called when the simulator is destroyed.
     void RemoveProcessor(Processor* processor);
 
     static GlobalMonitor* Get();
 
    private:
+    bool IsSingleThreaded() const { return num_processors_ == 1; }
+
     // Private constructor. Call {GlobalMonitor::Get()} to get the singleton.
     GlobalMonitor() = default;
     friend class base::LeakyObject<GlobalMonitor>;
 
-    bool IsProcessorInLinkedList_Locked(Processor* processor) const;
-    void PrependProcessor_Locked(Processor* processor);
-
     Processor* head_ = nullptr;
+    std::atomic<uint32_t> num_processors_ = 0;
+    base::Mutex mutex_;
   };
 
   LocalMonitor local_monitor_;
   GlobalMonitor::Processor global_monitor_processor_;
+  GlobalMonitor* global_monitor_;
 };
 
 }  // namespace internal

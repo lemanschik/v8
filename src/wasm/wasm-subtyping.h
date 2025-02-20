@@ -11,9 +11,7 @@
 
 #include "src/wasm/value-type.h"
 
-namespace v8 {
-namespace internal {
-namespace wasm {
+namespace v8::internal::wasm {
 
 struct WasmModule;
 
@@ -23,6 +21,8 @@ V8_NOINLINE V8_EXPORT_PRIVATE bool IsSubtypeOfImpl(
 V8_NOINLINE V8_EXPORT_PRIVATE bool IsHeapSubtypeOfImpl(
     HeapType sub_heap, HeapType super_heap, const WasmModule* sub_module,
     const WasmModule* super_module);
+V8_NOINLINE V8_EXPORT_PRIVATE bool IsSubtypeOfImpl(
+    CanonicalValueType subtype, CanonicalValueType supertype);
 
 // Checks if type1, defined in module1, is equivalent with type2, defined in
 // module2.
@@ -48,20 +48,18 @@ V8_NOINLINE V8_EXPORT_PRIVATE bool EquivalentTypes(ValueType type1,
 // - rtt1 <: rtt2 iff rtt1 ~ rtt2.
 // For heap types, the following subtyping rules hold:
 // - The abstract heap types form the following type hierarchies:
-//   TODO(7748): abstract ref.data should become ref.struct.
 //
-//           any              func         extern
-//            |                |             |
-//           eq              nofunc       noextern
-//          /  \
-//        i31   data
-//         |     |
-//         |   array
-//          \   /
-//          none
+//                   any               func         extern
+//               /        \             |             |
+//             eq          \          nofunc       noextern
+//          /   |   \       \
+//       i31  array  struct  string
+//          \___|______|_____/
+//                  |
+//                 none
 //
 // - All functions are subtypes of func.
-// - All structs are subtypes of data.
+// - All structs are subtypes of struct.
 // - All arrays are subtypes of array.
 // - An indexed heap type h1 is a subtype of indexed heap type h2 if h2 is
 //   transitively an explicit canonical supertype of h1.
@@ -75,11 +73,25 @@ V8_INLINE bool IsSubtypeOf(ValueType subtype, ValueType supertype,
 }
 
 // Checks if {subtype} is a subtype of {supertype} (both defined in {module}).
+// TODO(369369573): Make sure this overload is not misused.
 V8_INLINE bool IsSubtypeOf(ValueType subtype, ValueType supertype,
                            const WasmModule* module) {
   // If the types are trivially identical, exit early.
   if (V8_LIKELY(subtype == supertype)) return true;
   return IsSubtypeOfImpl(subtype, supertype, module, module);
+}
+
+V8_INLINE bool IsSubtypeOf(CanonicalValueType subtype,
+                           CanonicalValueType supertype) {
+  if (subtype == supertype) return true;
+  return IsSubtypeOfImpl(subtype, supertype);
+}
+
+V8_INLINE bool TypesUnrelated(ValueType type1, ValueType type2,
+                              const WasmModule* module1,
+                              const WasmModule* module2) {
+  return !IsSubtypeOf(type1, type2, module1, module2) &&
+         !IsSubtypeOf(type2, type1, module2, module1);
 }
 
 V8_INLINE bool IsHeapSubtypeOf(HeapType subtype, HeapType supertype,
@@ -107,6 +119,7 @@ V8_INLINE bool HeapTypesUnrelated(HeapType heap1, HeapType heap2,
 // Checks whether {subtype_index} is valid as a declared subtype of
 // {supertype_index}.
 // - Both type must be of the same kind (function, struct, or array).
+// - Both type must have the same {is_shared} flag.
 // - Structs: Subtype must have at least as many fields as supertype,
 //   covariance for respective immutable fields, equivalence for respective
 //   mutable fields.
@@ -114,10 +127,12 @@ V8_INLINE bool HeapTypesUnrelated(HeapType heap1, HeapType heap2,
 //   equivalence of element types for mutable arrays.
 // - Functions: equal number of parameter and return types. Contravariance for
 //   respective parameter types, covariance for respective return types.
-V8_EXPORT_PRIVATE bool ValidSubtypeDefinition(uint32_t subtype_index,
-                                              uint32_t supertype_index,
+V8_EXPORT_PRIVATE bool ValidSubtypeDefinition(ModuleTypeIndex subtype_index,
+                                              ModuleTypeIndex supertype_index,
                                               const WasmModule* sub_module,
                                               const WasmModule* super_module);
+
+V8_EXPORT_PRIVATE bool IsShared(ValueType type, const WasmModule* module);
 
 struct TypeInModule {
   ValueType type;
@@ -142,6 +157,8 @@ inline std::ostream& operator<<(std::ostream& oss, TypeInModule type) {
              << reinterpret_cast<intptr_t>(type.module);
 }
 
+// Returns the common ancestor of {type1} and {type2}. Returns kTop if they
+// don't have a common ancestor.
 V8_EXPORT_PRIVATE TypeInModule Union(ValueType type1, ValueType type2,
                                      const WasmModule* module1,
                                      const WasmModule* module2);
@@ -167,8 +184,6 @@ ValueType ToNullSentinel(TypeInModule type);
 bool IsSameTypeHierarchy(HeapType type1, HeapType type2,
                          const WasmModule* module);
 
-}  // namespace wasm
-}  // namespace internal
-}  // namespace v8
+}  // namespace v8::internal::wasm
 
 #endif  // V8_WASM_WASM_SUBTYPING_H_

@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --harmony-json-parse-with-source
 
 (function TestBigInt() {
   const tooBigForNumber = BigInt(Number.MAX_SAFE_INTEGER) + 2n;
@@ -149,6 +148,10 @@ function GenerateParseReviverFunction(texts) {
     '{"x":{"x":1,"y":2}}',
     JSON.stringify({ x: { x: JSON.rawJSON(1), y: JSON.rawJSON(2) } })
   );
+  assertEquals(
+    `"${'\u1234'.repeat(128)}"`,
+    JSON.stringify(JSON.rawJSON(`"${'\u1234'.repeat(128)}"`))
+  );
 })();
 
 (function TestArray() {
@@ -250,7 +253,7 @@ function assertIsRawJson(rawJson, expectedRawJsonValue) {
       } else if (key == 'b') {
         this.c = 3;
         assertEquals(2, value);
-        assertEquals('1', source);
+        assertEquals(undefined, source);
       } else if (key == 'c') {
         assertEquals(3, value);
         assertEquals(undefined, source);
@@ -271,11 +274,11 @@ function assertIsRawJson(rawJson, expectedRawJsonValue) {
       } else if (key == '1') {
         this[2] = 4;
         assertEquals(3, value);
-        assertEquals('2', source);
+        assertEquals(undefined, source);
       } else if(key == '2') {
         this[3] = 5;
         assertEquals(4, value);
-        assertEquals('3', source);
+        assertEquals(undefined, source);
       } else if(key == '5'){
         assertEquals(5, value);
         assertEquals(undefined, source);

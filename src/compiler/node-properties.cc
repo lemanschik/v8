@@ -4,13 +4,15 @@
 
 #include "src/compiler/node-properties.h"
 
+#include <optional>
+
 #include "src/compiler/common-operator.h"
-#include "src/compiler/graph.h"
 #include "src/compiler/js-heap-broker.h"
 #include "src/compiler/map-inference.h"
 #include "src/compiler/node-matchers.h"
 #include "src/compiler/operator-properties.h"
 #include "src/compiler/simplified-operator.h"
+#include "src/compiler/turbofan-graph.h"
 #include "src/compiler/verifier.h"
 
 namespace v8 {
@@ -204,6 +206,10 @@ void NodeProperties::ChangeOp(Node* node, const Operator* new_op) {
   Verifier::VerifyNode(node);
 }
 
+// static
+void NodeProperties::ChangeOpUnchecked(Node* node, const Operator* new_op) {
+  node->set_op(new_op);
+}
 
 // static
 Node* NodeProperties::FindFrameStateBefore(Node* node,
@@ -304,13 +310,68 @@ void NodeProperties::CollectControlProjections(Node* node, Node** projections,
 }
 
 // static
+MachineRepresentation NodeProperties::GetProjectionType(
+    Node const* projection) {
+  size_t index = ProjectionIndexOf(projection->op());
+  Node* input = projection->InputAt(0);
+  switch (input->opcode()) {
+    case IrOpcode::kInt32AddWithOverflow:
+    case IrOpcode::kInt32SubWithOverflow:
+    case IrOpcode::kInt32MulWithOverflow:
+    case IrOpcode::kInt32AbsWithOverflow:
+      CHECK_LE(index, static_cast<size_t>(1));
+      return index == 0 ? MachineRepresentation::kWord32
+                        : MachineRepresentation::kBit;
+    case IrOpcode::kInt64AddWithOverflow:
+    case IrOpcode::kInt64SubWithOverflow:
+    case IrOpcode::kInt64MulWithOverflow:
+    case IrOpcode::kInt64AbsWithOverflow:
+      CHECK_LE(index, static_cast<size_t>(1));
+      return index == 0 ? MachineRepresentation::kWord64
+                        : MachineRepresentation::kBit;
+    case IrOpcode::kTryTruncateFloat64ToInt32:
+    case IrOpcode::kTryTruncateFloat64ToUint32:
+      CHECK_LE(index, static_cast<size_t>(1));
+      return index == 0 ? MachineRepresentation::kWord32
+                        : MachineRepresentation::kBit;
+    case IrOpcode::kTryTruncateFloat32ToInt64:
+    case IrOpcode::kTryTruncateFloat64ToInt64:
+    case IrOpcode::kTryTruncateFloat64ToUint64:
+    case IrOpcode::kTryTruncateFloat32ToUint64:
+      CHECK_LE(index, static_cast<size_t>(1));
+      return index == 0 ? MachineRepresentation::kWord64
+                        : MachineRepresentation::kBit;
+    case IrOpcode::kCall: {
+      auto call_descriptor = CallDescriptorOf(input->op());
+      return call_descriptor->GetReturnType(index).representation();
+    }
+    case IrOpcode::kInt32PairAdd:
+    case IrOpcode::kInt32PairSub:
+    case IrOpcode::kWord32AtomicPairLoad:
+    case IrOpcode::kWord32AtomicPairAdd:
+    case IrOpcode::kWord32AtomicPairSub:
+    case IrOpcode::kWord32AtomicPairAnd:
+    case IrOpcode::kWord32AtomicPairOr:
+    case IrOpcode::kWord32AtomicPairXor:
+    case IrOpcode::kWord32AtomicPairExchange:
+    case IrOpcode::kWord32AtomicPairCompareExchange:
+      CHECK_LE(index, static_cast<size_t>(1));
+      return MachineRepresentation::kWord32;
+    default:
+      return MachineRepresentation::kNone;
+  }
+}
+
+// static
 bool NodeProperties::IsSame(Node* a, Node* b) {
   for (;;) {
-    if (a->opcode() == IrOpcode::kCheckHeapObject) {
+    if (a->opcode() == IrOpcode::kCheckHeapObject ||
+        a->opcode() == IrOpcode::kTypeGuard) {
       a = GetValueInput(a, 0);
       continue;
     }
-    if (b->opcode() == IrOpcode::kCheckHeapObject) {
+    if (b->opcode() == IrOpcode::kCheckHeapObject ||
+        b->opcode() == IrOpcode::kTypeGuard) {
       b = GetValueInput(b, 0);
       continue;
     }
@@ -319,8 +380,8 @@ bool NodeProperties::IsSame(Node* a, Node* b) {
 }
 
 // static
-base::Optional<MapRef> NodeProperties::GetJSCreateMap(JSHeapBroker* broker,
-                                                      Node* receiver) {
+OptionalMapRef NodeProperties::GetJSCreateMap(JSHeapBroker* broker,
+                                              Node* receiver) {
   DCHECK(receiver->opcode() == IrOpcode::kJSCreate ||
          receiver->opcode() == IrOpcode::kJSCreateArray);
   HeapObjectMatcher mtarget(GetValueInput(receiver, 0));
@@ -329,45 +390,23 @@ base::Optional<MapRef> NodeProperties::GetJSCreateMap(JSHeapBroker* broker,
       mnewtarget.Ref(broker).IsJSFunction()) {
     ObjectRef target = mtarget.Ref(broker);
     JSFunctionRef newtarget = mnewtarget.Ref(broker).AsJSFunction();
-    if (newtarget.map().has_prototype_slot() &&
-        newtarget.has_initial_map(broker->dependencies())) {
-      MapRef initial_map = newtarget.initial_map(broker->dependencies());
-      if (initial_map.GetConstructor().equals(target)) {
-        DCHECK(target.AsJSFunction().map().is_constructor());
-        DCHECK(newtarget.map().is_constructor());
+    if (newtarget.map(broker).has_prototype_slot() &&
+        newtarget.has_initial_map(broker)) {
+      MapRef initial_map = newtarget.initial_map(broker);
+      if (initial_map.GetConstructor(broker).equals(target)) {
+        DCHECK(target.AsJSFunction().map(broker).is_constructor());
+        DCHECK(newtarget.map(broker).is_constructor());
         return initial_map;
       }
     }
   }
-  return base::nullopt;
+  return std::nullopt;
 }
-
-namespace {
-
-// TODO(jgruber): Remove the intermediate ZoneHandleSet and then this function.
-ZoneRefUnorderedSet<MapRef> ToRefSet(JSHeapBroker* broker,
-                                     const ZoneHandleSet<Map>& handles) {
-  ZoneRefUnorderedSet<MapRef> refs =
-      ZoneRefUnorderedSet<MapRef>(broker->zone());
-  for (Handle<Map> handle : handles) {
-    refs.insert(MakeRefAssumeMemoryFence(broker, *handle));
-  }
-  return refs;
-}
-
-ZoneRefUnorderedSet<MapRef> RefSetOf(JSHeapBroker* broker, const MapRef& ref) {
-  ZoneRefUnorderedSet<MapRef> refs =
-      ZoneRefUnorderedSet<MapRef>(broker->zone());
-  refs.insert(ref);
-  return refs;
-}
-
-}  // namespace
 
 // static
 NodeProperties::InferMapsResult NodeProperties::InferMapsUnsafe(
     JSHeapBroker* broker, Node* receiver, Effect effect,
-    ZoneRefUnorderedSet<MapRef>* maps_out) {
+    ZoneRefSet<Map>* maps_out) {
   HeapObjectMatcher m(receiver);
   if (m.HasResolvedValue()) {
     HeapObjectRef ref = m.Ref(broker);
@@ -380,10 +419,10 @@ NodeProperties::InferMapsResult NodeProperties::InferMapsUnsafe(
     // Object.prototype have NO_ELEMENTS elements kind.
     if (!ref.IsJSObject() ||
         !broker->IsArrayOrObjectPrototype(ref.AsJSObject())) {
-      if (ref.map().is_stable()) {
+      if (ref.map(broker).is_stable()) {
         // The {receiver_map} is only reliable when we install a stability
         // code dependency.
-        *maps_out = RefSetOf(broker, ref.map());
+        *maps_out = ZoneRefSet<Map>{ref.map(broker)};
         return kUnreliableMaps;
       }
     }
@@ -391,10 +430,16 @@ NodeProperties::InferMapsResult NodeProperties::InferMapsUnsafe(
   InferMapsResult result = kReliableMaps;
   while (true) {
     switch (effect->opcode()) {
+      case IrOpcode::kTypeGuard: {
+        DCHECK_EQ(1, effect->op()->EffectInputCount());
+        effect = NodeProperties::GetEffectInput(effect);
+        continue;
+      }
+
       case IrOpcode::kMapGuard: {
         Node* const object = GetValueInput(effect, 0);
         if (IsSame(receiver, object)) {
-          *maps_out = ToRefSet(broker, MapGuardMapsOf(effect->op()));
+          *maps_out = MapGuardMapsOf(effect->op());
           return result;
         }
         break;
@@ -402,17 +447,25 @@ NodeProperties::InferMapsResult NodeProperties::InferMapsUnsafe(
       case IrOpcode::kCheckMaps: {
         Node* const object = GetValueInput(effect, 0);
         if (IsSame(receiver, object)) {
-          *maps_out =
-              ToRefSet(broker, CheckMapsParametersOf(effect->op()).maps());
+          *maps_out = CheckMapsParametersOf(effect->op()).maps();
+          return result;
+        }
+        break;
+      }
+      case IrOpcode::kTransitionElementsKindOrCheckMap: {
+        Node* const object = GetValueInput(effect, 0);
+        if (IsSame(receiver, object)) {
+          *maps_out = ZoneRefSet<Map>{
+              ElementsTransitionWithMultipleSourcesOf(effect->op()).target()};
           return result;
         }
         break;
       }
       case IrOpcode::kJSCreate: {
         if (IsSame(receiver, effect)) {
-          base::Optional<MapRef> initial_map = GetJSCreateMap(broker, receiver);
+          OptionalMapRef initial_map = GetJSCreateMap(broker, receiver);
           if (initial_map.has_value()) {
-            *maps_out = RefSetOf(broker, initial_map.value());
+            *maps_out = ZoneRefSet<Map>{initial_map.value()};
             return result;
           }
           // We reached the allocation of the {receiver}.
@@ -423,10 +476,9 @@ NodeProperties::InferMapsResult NodeProperties::InferMapsUnsafe(
       }
       case IrOpcode::kJSCreatePromise: {
         if (IsSame(receiver, effect)) {
-          *maps_out = RefSetOf(
-              broker,
-              broker->target_native_context().promise_function().initial_map(
-                  broker->dependencies()));
+          *maps_out = ZoneRefSet<Map>{broker->target_native_context()
+                                          .promise_function(broker)
+                                          .initial_map(broker)};
           return result;
         }
         break;
@@ -441,7 +493,7 @@ NodeProperties::InferMapsResult NodeProperties::InferMapsUnsafe(
             Node* const value = GetValueInput(effect, 1);
             HeapObjectMatcher m2(value);
             if (m2.HasResolvedValue()) {
-              *maps_out = RefSetOf(broker, m2.Ref(broker).AsMap());
+              *maps_out = ZoneRefSet<Map>{m2.Ref(broker).AsMap()};
               return result;
             }
           }
@@ -533,7 +585,7 @@ bool NodeProperties::CanBePrimitive(JSHeapBroker* broker, Node* receiver,
       return false;
     case IrOpcode::kHeapConstant: {
       HeapObjectRef value = HeapObjectMatcher(receiver).Ref(broker);
-      return value.map().IsPrimitiveMap();
+      return value.map(broker).IsPrimitiveMap();
     }
     default: {
       MapInference inference(broker, receiver, effect);
@@ -550,6 +602,7 @@ bool NodeProperties::CanBeNullOrUndefined(JSHeapBroker* broker, Node* receiver,
     switch (receiver->opcode()) {
       case IrOpcode::kCheckInternalizedString:
       case IrOpcode::kCheckNumber:
+      case IrOpcode::kCheckNumberFitsInt32:
       case IrOpcode::kCheckSmi:
       case IrOpcode::kCheckString:
       case IrOpcode::kCheckSymbol:
@@ -563,7 +616,7 @@ bool NodeProperties::CanBeNullOrUndefined(JSHeapBroker* broker, Node* receiver,
         return false;
       case IrOpcode::kHeapConstant: {
         HeapObjectRef value = HeapObjectMatcher(receiver).Ref(broker);
-        OddballType type = value.map().oddball_type();
+        OddballType type = value.map(broker).oddball_type(broker);
         return type == OddballType::kNull || type == OddballType::kUndefined;
       }
       default:

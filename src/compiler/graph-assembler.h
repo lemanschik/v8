@@ -15,6 +15,7 @@
 #include "src/compiler/js-graph.h"
 #include "src/compiler/node.h"
 #include "src/compiler/simplified-operator.h"
+#include "src/objects/hole.h"
 #include "src/objects/oddball.h"
 
 namespace v8 {
@@ -22,12 +23,6 @@ namespace internal {
 
 class JSGraph;
 class Graph;
-class Oddball;
-
-// TODO(jgruber): Currently this is too permissive, but at least it lets us
-// document which functions expect JS booleans. If a real Boolean type becomes
-// possible in the future, use that instead.
-using Boolean = Oddball;
 
 namespace compiler {
 
@@ -79,7 +74,7 @@ class Reducer;
   V(Float64Sub)                                     \
   V(Int32Add)                                       \
   V(Int32LessThan)                                  \
-  V(Int32LessThanOrEqual)                           \
+  T(Int32LessThanOrEqual, BoolT, Int32T, Int32T)    \
   V(Int32Mul)                                       \
   V(Int32Sub)                                       \
   V(Int64Add)                                       \
@@ -88,14 +83,14 @@ class Reducer;
   V(IntLessThan)                                    \
   V(IntMul)                                         \
   V(IntSub)                                         \
-  V(Uint32LessThan)                                 \
+  T(Uint32LessThan, BoolT, Uint32T, Uint32T)        \
   T(Uint32LessThanOrEqual, BoolT, Uint32T, Uint32T) \
-  V(Uint64LessThan)                                 \
+  T(Uint64LessThan, BoolT, Uint64T, Uint64T)        \
   T(Uint64LessThanOrEqual, BoolT, Uint64T, Uint64T) \
   V(UintLessThan)                                   \
   T(Word32And, Word32T, Word32T, Word32T)           \
   T(Word32Equal, BoolT, Word32T, Word32T)           \
-  V(Word32Or)                                       \
+  T(Word32Or, Word32T, Word32T, Word32T)            \
   V(Word32Sar)                                      \
   V(Word32SarShiftOutZeros)                         \
   V(Word32Shl)                                      \
@@ -134,29 +129,30 @@ class Reducer;
   V(Uint64Div)                               \
   V(Uint64Mod)
 
-#define JSGRAPH_SINGLETON_CONSTANT_LIST(V)      \
-  V(AllocateInOldGenerationStub, Code)          \
-  V(AllocateInYoungGenerationStub, Code)        \
-  V(AllocateRegularInOldGenerationStub, Code)   \
-  V(AllocateRegularInYoungGenerationStub, Code) \
-  V(BigIntMap, Map)                             \
-  V(BooleanMap, Map)                            \
-  V(EmptyString, String)                        \
-  V(False, Boolean)                             \
-  V(FixedArrayMap, Map)                         \
-  V(FixedDoubleArrayMap, Map)                   \
-  V(WeakFixedArrayMap, Map)                     \
-  V(HeapNumberMap, Map)                         \
-  V(MinusOne, Number)                           \
-  V(NaN, Number)                                \
-  V(NoContext, Object)                          \
-  V(Null, Oddball)                              \
-  V(One, Number)                                \
-  V(TheHole, Oddball)                           \
-  V(ToNumberBuiltin, Code)                      \
-  V(PlainPrimitiveToNumberBuiltin, Code)        \
-  V(True, Boolean)                              \
-  V(Undefined, Oddball)                         \
+#define JSGRAPH_SINGLETON_CONSTANT_LIST(V)                         \
+  V(AllocateInOldGenerationStub, InstructionStream)                \
+  V(AllocateInYoungGenerationStub, InstructionStream)              \
+  IF_WASM(V, WasmAllocateInYoungGenerationStub, InstructionStream) \
+  IF_WASM(V, WasmAllocateInOldGenerationStub, InstructionStream)   \
+  V(BigIntMap, Map)                                                \
+  V(BooleanMap, Map)                                               \
+  V(EmptyString, String)                                           \
+  V(ExternalObjectMap, Map)                                        \
+  V(False, Boolean)                                                \
+  V(FixedArrayMap, Map)                                            \
+  V(FixedDoubleArrayMap, Map)                                      \
+  V(WeakFixedArrayMap, Map)                                        \
+  V(HeapNumberMap, Map)                                            \
+  V(MinusOne, Number)                                              \
+  V(NaN, Number)                                                   \
+  V(NoContext, Object)                                             \
+  V(Null, Null)                                                    \
+  V(One, Number)                                                   \
+  V(TheHole, Hole)                                                 \
+  V(ToNumberBuiltin, InstructionStream)                            \
+  V(PlainPrimitiveToNumberBuiltin, InstructionStream)              \
+  V(True, Boolean)                                                 \
+  V(Undefined, Undefined)                                          \
   V(Zero, Number)
 
 class GraphAssembler;
@@ -285,7 +281,7 @@ class V8_EXPORT_PRIVATE GraphAssembler {
   GraphAssembler(
       MachineGraph* jsgraph, Zone* zone,
       BranchSemantics default_branch_semantics,
-      base::Optional<NodeChangedCallback> node_changed_callback = base::nullopt,
+      std::optional<NodeChangedCallback> node_changed_callback = std::nullopt,
       bool mark_loop_exits = false);
   virtual ~GraphAssembler();
   virtual SimplifiedOperatorBuilder* simplified() { UNREACHABLE(); }
@@ -335,12 +331,21 @@ class V8_EXPORT_PRIVATE GraphAssembler {
   Node* Uint64Constant(uint64_t value);
   Node* UniqueIntPtrConstant(intptr_t value);
   Node* Float64Constant(double value);
-  Node* Projection(int index, Node* value);
   Node* ExternalConstant(ExternalReference ref);
+  Node* IsolateField(IsolateFieldId id);
+
+  Node* Projection(int index, Node* value, Node* ctrl = nullptr);
 
   Node* Parameter(int index);
 
   Node* LoadFramePointer();
+
+  Node* LoadRootRegister();
+
+#if V8_ENABLE_WEBASSEMBLY
+  Node* LoadStackPointer();
+  Node* SetStackPointer(Node* sp);
+#endif
 
   Node* LoadHeapNumberValue(Node* heap_number);
 
@@ -355,11 +360,13 @@ class V8_EXPORT_PRIVATE GraphAssembler {
   CHECKED_ASSEMBLER_MACH_BINOP_LIST(BINOP_DECL)
 #undef BINOP_DECL
 #undef BINOP_DECL_TNODE
+  TNode<BoolT> UintPtrLessThan(TNode<UintPtrT> left, TNode<UintPtrT> right);
   TNode<BoolT> UintPtrLessThanOrEqual(TNode<UintPtrT> left,
                                       TNode<UintPtrT> right);
   TNode<UintPtrT> UintPtrAdd(TNode<UintPtrT> left, TNode<UintPtrT> right);
   TNode<UintPtrT> UintPtrSub(TNode<UintPtrT> left, TNode<UintPtrT> right);
   TNode<UintPtrT> UintPtrDiv(TNode<UintPtrT> left, TNode<UintPtrT> right);
+  TNode<UintPtrT> ChangeUint32ToUintPtr(SloppyTNode<Uint32T> value);
 
 #ifdef V8_MAP_PACKING
   Node* PackMapWord(TNode<Map> map);
@@ -369,14 +376,7 @@ class V8_EXPORT_PRIVATE GraphAssembler {
 
   Node* DebugBreak();
 
-  // Unreachable nodes are similar to Goto in that they reset effect/control to
-  // nullptr and it's thus not possible to append other nodes without first
-  // binding a new label.
-  // The block_updater_successor label is a crutch to work around block updater
-  // weaknesses (see the related comment in ConnectUnreachableToEnd); if the
-  // block updater exists, we cannot connect unreachable to end, instead we
-  // must preserve the Goto pattern.
-  Node* Unreachable(GraphAssemblerLabel<0u>* block_updater_successor = nullptr);
+  Node* Unreachable();
   // This special variant doesn't connect the Unreachable node to end, and does
   // not reset current effect/control. Intended only for special use-cases like
   // lowering DeadValue.
@@ -405,7 +405,9 @@ class V8_EXPORT_PRIVATE GraphAssembler {
   }
   Node* Checkpoint(FrameState frame_state);
 
-  TNode<RawPtrT> StackSlot(int size, int alignment);
+  TNode<RawPtrT> StackSlot(int size, int alignment, bool is_tagged = false);
+
+  Node* AdaptLocalArgument(Node* argument);
 
   Node* Store(StoreRepresentation rep, Node* object, Node* offset, Node* value);
   Node* Store(StoreRepresentation rep, Node* object, int offset, Node* value);
@@ -419,9 +421,13 @@ class V8_EXPORT_PRIVATE GraphAssembler {
   Node* ProtectedStore(MachineRepresentation rep, Node* object, Node* offset,
                        Node* value);
   Node* ProtectedLoad(MachineType type, Node* object, Node* offset);
+  Node* LoadTrapOnNull(MachineType type, Node* object, Node* offset);
+  Node* StoreTrapOnNull(StoreRepresentation rep, Node* object, Node* offset,
+                        Node* value);
 
   Node* Retain(Node* buffer);
   Node* IntPtrAdd(Node* a, Node* b);
+  Node* IntPtrSub(Node* a, Node* b);
 
   Node* DeoptimizeIf(DeoptimizeReason reason, FeedbackSource const& feedback,
                      Node* condition, Node* frame_state);
@@ -501,6 +507,8 @@ class V8_EXPORT_PRIVATE GraphAssembler {
   void GotoIfNot(Node* condition,
                  detail::GraphAssemblerLabelForVars<Vars...>* label, Vars...);
 
+  void RuntimeAbort(AbortReason reason);
+
   bool HasActiveBlock() const {
     // This is false if the current block has been terminated (e.g. by a Goto or
     // Unreachable). In that case, a new label must be bound before we can
@@ -541,6 +549,8 @@ class V8_EXPORT_PRIVATE GraphAssembler {
 
   Control control() const { return Control(control_); }
   Effect effect() const { return Effect(effect_); }
+
+  Node* start() const { return graph()->start(); }
 
  protected:
   constexpr bool Is64() const { return kSystemPointerSize == 8; }
@@ -646,7 +656,7 @@ class V8_EXPORT_PRIVATE GraphAssembler {
   Node* control_;
   // {node_changed_callback_} should be called when a node outside the
   // subgraph created by the graph assembler changes.
-  base::Optional<NodeChangedCallback> node_changed_callback_;
+  std::optional<NodeChangedCallback> node_changed_callback_;
 
   // Inline reducers enable reductions to be performed to nodes as they are
   // added to the graph with the graph assembler.
@@ -944,20 +954,22 @@ class V8_EXPORT_PRIVATE JSGraphAssembler : public GraphAssembler {
   // Constructs a JSGraphAssembler. If {schedule} is not null, the graph
   // assembler will maintain the schedule as it updates blocks.
   JSGraphAssembler(
-      JSGraph* jsgraph, Zone* zone, BranchSemantics branch_semantics,
-      base::Optional<NodeChangedCallback> node_changed_callback = base::nullopt,
+      JSHeapBroker* broker, JSGraph* jsgraph, Zone* zone,
+      BranchSemantics branch_semantics,
+      std::optional<NodeChangedCallback> node_changed_callback = std::nullopt,
       bool mark_loop_exits = false)
       : GraphAssembler(jsgraph, zone, branch_semantics, node_changed_callback,
                        mark_loop_exits),
+        broker_(broker),
         jsgraph_(jsgraph),
         outermost_catch_scope_(CatchScope::Outermost(zone)),
         catch_scope_(&outermost_catch_scope_) {
     outermost_catch_scope_.set_gasm(this);
   }
 
-  Node* SmiConstant(int32_t value);
+  TNode<Smi> SmiConstant(int32_t value);
   TNode<HeapObject> HeapConstant(Handle<HeapObject> object);
-  TNode<Object> Constant(const ObjectRef& ref);
+  TNode<Object> Constant(ObjectRef ref);
   TNode<Number> NumberConstant(double value);
   Node* CEntryStubConstant(int result_size);
 
@@ -993,6 +1005,8 @@ class V8_EXPORT_PRIVATE JSGraphAssembler : public GraphAssembler {
   Node* StoreField(FieldAccess const&, Node* object, Node* value);
   Node* StoreElement(ElementAccess const&, Node* object, Node* index,
                      Node* value);
+  Node* ClearPendingMessage();
+
   void TransitionAndStoreElement(MapRef double_map, MapRef fast_map,
                                  TNode<HeapObject> object, TNode<Number> index,
                                  TNode<Object> value);
@@ -1016,7 +1030,16 @@ class V8_EXPORT_PRIVATE JSGraphAssembler : public GraphAssembler {
   TNode<Boolean> ObjectIsCallable(TNode<Object> value);
   TNode<Boolean> ObjectIsSmi(TNode<Object> value);
   TNode<Boolean> ObjectIsUndetectable(TNode<Object> value);
-  Node* CheckIf(Node* cond, DeoptimizeReason reason);
+  Node* BooleanNot(Node* cond);
+  Node* CheckSmi(Node* value, const FeedbackSource& feedback = {});
+  Node* CheckNumber(Node* value, const FeedbackSource& feedback = {});
+  Node* CheckNumberFitsInt32(Node* value, const FeedbackSource& feedback = {});
+  Node* CheckIf(Node* cond, DeoptimizeReason reason,
+                const FeedbackSource& feedback = {});
+  Node* Assert(Node* cond, const char* condition_string = "",
+               const char* file = "", int line = -1);
+  void Assert(TNode<Word32T> cond, const char* condition_string = "",
+              const char* file = "", int line = -1);
   TNode<Boolean> NumberIsFloat64Hole(TNode<Number> value);
   TNode<Boolean> ToBoolean(TNode<Object> value);
   TNode<Object> ConvertTaggedHoleToUndefined(TNode<Object> value);
@@ -1027,6 +1050,7 @@ class V8_EXPORT_PRIVATE JSGraphAssembler : public GraphAssembler {
                                               TNode<Number> new_length,
                                               TNode<Number> old_length);
   Node* StringCharCodeAt(TNode<String> string, TNode<Number> position);
+  TNode<String> StringFromSingleCharCode(TNode<Number> code);
   TNode<Object> DoubleArrayMax(TNode<JSArray> array);
   TNode<Object> DoubleArrayMin(TNode<JSArray> array);
   // Computes the byte length for a given {array_buffer_view}. If the set of
@@ -1037,6 +1061,12 @@ class V8_EXPORT_PRIVATE JSGraphAssembler : public GraphAssembler {
   TNode<Number> ArrayBufferViewByteLength(
       TNode<JSArrayBufferView> array_buffer_view, InstanceType instance_type,
       std::set<ElementsKind> elements_kinds_candidates, TNode<Context> context);
+  // Load just the detached bit on a TypedArray or DataView. For the full
+  // detached and out-of-bounds check on TypedArrays, please use
+  // CheckIfTypedArrayWasDetachedOrOutOfBounds.
+  TNode<Word32T> ArrayBufferDetachedBit(TNode<HeapObject> buffer);
+  TNode<Word32T> ArrayBufferViewDetachedBit(
+      TNode<JSArrayBufferView> array_buffer_view);
   // Computes the length for a given {typed_array}. If the set of possible
   // ElementsKinds is known statically pass as {elements_kinds_candidates} to
   // allow the assembler to generate more efficient code. Pass an empty
@@ -1045,17 +1075,25 @@ class V8_EXPORT_PRIVATE JSGraphAssembler : public GraphAssembler {
   TNode<Number> TypedArrayLength(
       TNode<JSTypedArray> typed_array,
       std::set<ElementsKind> elements_kinds_candidates, TNode<Context> context);
+  // Performs the full detached check. This includes fixed-length RABs whos
+  // underlying buffer has been shrunk OOB.
+  void CheckIfTypedArrayWasDetachedOrOutOfBounds(
+      TNode<JSTypedArray> typed_array,
+      std::set<ElementsKind> elements_kinds_candidates,
+      const FeedbackSource& feedback);
   TNode<Uint32T> LookupByteShiftForElementsKind(TNode<Uint32T> elements_kind);
   TNode<Uint32T> LookupByteSizeForElementsKind(TNode<Uint32T> elements_kind);
 
   TNode<Object> JSCallRuntime1(
       Runtime::FunctionId function_id, TNode<Object> arg0,
-      TNode<Context> context, base::Optional<FrameState> frame_state,
+      TNode<Context> context, std::optional<FrameState> frame_state,
       Operator::Properties properties = Operator::kNoProperties);
   TNode<Object> JSCallRuntime2(Runtime::FunctionId function_id,
                                TNode<Object> arg0, TNode<Object> arg1,
                                TNode<Context> context, FrameState frame_state);
+  Node* Chained(const Operator* op, Node* input);
 
+  JSHeapBroker* broker() const { return broker_; }
   JSGraph* jsgraph() const { return jsgraph_; }
   Isolate* isolate() const { return jsgraph()->isolate(); }
   SimplifiedOperatorBuilder* simplified() override {
@@ -1372,11 +1410,21 @@ class V8_EXPORT_PRIVATE JSGraphAssembler : public GraphAssembler {
   IfBuilder1<T, Word32T> MachineSelectIf(TNode<Word32T> cond) {
     return {this, cond, false};
   }
+  template <typename T>
+  TNode<T> MachineSelect(TNode<Word32T> cond, TNode<T> true_value,
+                         TNode<T> false_value,
+                         BranchHint hint = BranchHint::kNone) {
+    return TNode<T>::UncheckedCast(AddNode(
+        graph()->NewNode(common()->Select(T::kMachineRepresentation, hint,
+                                          BranchSemantics::kMachine),
+                         cond, true_value, false_value)));
+  }
 
  protected:
   Operator const* PlainPrimitiveToNumberOperator();
 
  private:
+  JSHeapBroker* broker_;
   JSGraph* jsgraph_;
   SetOncePointer<Operator const> to_number_operator_;
 

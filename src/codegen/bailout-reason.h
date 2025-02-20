@@ -22,15 +22,20 @@ namespace internal {
   V(kAllocationIsNotDoubleAligned, "Allocation is not double aligned")         \
   V(kExpectedOptimizationSentinel,                                             \
     "Expected optimized code cell or optimization sentinel")                   \
+  V(kExpectedOsrCode, "Expected OSR code")                                     \
   V(kExpectedUndefinedOrCell, "Expected undefined or cell in register")        \
+  V(kExpectedFeedbackCell, "Expected feedback cell")                           \
   V(kExpectedFeedbackVector, "Expected feedback vector")                       \
   V(kExpectedBaselineData, "Expected baseline data")                           \
+  V(kFloat64IsNotAInt32,                                                       \
+    "Float64 cannot be converted to Int32 without loss of precision")          \
   V(kFunctionDataShouldBeBytecodeArrayOnInterpreterEntry,                      \
     "The function_data field should be a BytecodeArray on interpreter entry")  \
   V(kInputStringTooLong, "Input string too long")                              \
   V(kInputDoesNotFitSmi, "Input number is too large to fit in a Smi")          \
   V(kInvalidBytecode, "Invalid bytecode")                                      \
   V(kInvalidBytecodeAdvance, "Cannot advance current bytecode, ")              \
+  V(kInvalidDeoptimizedCode, "Invoked code which is deoptimized")              \
   V(kInvalidHandleScopeLevel, "Invalid HandleScope level")                     \
   V(kInvalidJumpTableIndex, "Invalid jump table index")                        \
   V(kInvalidParametersAndRegistersInGenerator,                                 \
@@ -54,7 +59,8 @@ namespace internal {
   V(kOperandIsNotAFunction, "Operand is not a function")                       \
   V(kOperandIsNotACallableFunction, "Operand is not a callable function")      \
   V(kOperandIsNotAGeneratorObject, "Operand is not a generator object")        \
-  V(kOperandIsNotACodeT, "Operand is not a CodeT")                             \
+  V(kOperandIsNotACode, "Operand is not a Code object")                        \
+  V(kOperandIsNotAMap, "Operand is not a Map object")                          \
   V(kOperandIsNotASmi, "Operand is not a smi")                                 \
   V(kPromiseAlreadySettled, "Promise already settled")                         \
   V(kReceivedInvalidReturnAddress, "Received invalid return address")          \
@@ -63,7 +69,10 @@ namespace internal {
   V(kShouldNotDirectlyEnterOsrFunction,                                        \
     "Should not directly enter OSR-compiled function")                         \
   V(kStackAccessBelowStackPointer, "Stack access below stack pointer")         \
+  V(kOsrUnexpectedStackSize, "Unexpected stack size on OSR entry")             \
   V(kStackFrameTypesMustMatch, "Stack frame types must match")                 \
+  V(kUint32IsNotAInt32,                                                        \
+    "Uint32 cannot be converted to Int32 without loss of precision")           \
   V(kUnalignedCellInWriteBarrier, "Unaligned cell in write barrier")           \
   V(kUnexpectedAdditionalPopValue, "Unexpected additional pop value")          \
   V(kUnexpectedElementsKindInArrayConstructor,                                 \
@@ -83,6 +92,7 @@ namespace internal {
     "Should not return after throwing a wasm trap")                            \
   V(kUnexpectedStackPointer, "The stack pointer is not the expected value")    \
   V(kUnexpectedValue, "Unexpected value")                                      \
+  V(kUninhabitableType, "Uninhabitable type")                                  \
   V(kUnsupportedModuleOperation, "Unsupported module operation")               \
   V(kUnsupportedNonPrimitiveCompare, "Unsupported non-primitive compare")      \
   V(kWrongAddressOrValuePassedToRecordWrite,                                   \
@@ -91,22 +101,37 @@ namespace internal {
     "Wrong number of arguments for intrinsic")                                 \
   V(kWrongFunctionCodeStart, "Wrong value in code start register passed")      \
   V(kWrongFunctionContext, "Wrong context passed to function")                 \
+  V(kWrongFunctionDispatchHandle,                                              \
+    "Wrong value in dispatch handle register passed")                          \
   V(kUnexpectedThreadInWasmSet, "thread_in_wasm flag was already set")         \
-  V(kUnexpectedThreadInWasmUnset, "thread_in_wasm flag was not set")
+  V(kUnexpectedThreadInWasmUnset, "thread_in_wasm flag was not set")           \
+  V(kInvalidReceiver, "Expected JS object or primitive object")                \
+  V(kUnexpectedInstanceType, "Unexpected instance type encountered")           \
+  V(kTurboshaftTypeAssertionFailed,                                            \
+    "A type assertion failed in Turboshaft-generated code")                    \
+  V(kMetadataAreaStartDoesNotMatch,                                            \
+    "The metadata doesn't belong to the chunk")                                \
+  V(kExternalPointerTagMismatch,                                               \
+    "Tag mismatch during external pointer access")                             \
+  V(kJSSignatureMismatch, "Signature mismatch during JS function call")        \
+  V(kWasmSignatureMismatch, "Signature mismatch during Wasm indirect call")    \
+  V(kFastCallFallbackInvalid, "Fast call fallback returned incorrect type")
 
-#define BAILOUT_MESSAGES_LIST(V)                                            \
-  V(kNoReason, "no reason")                                                 \
-                                                                            \
-  V(kBailedOutDueToDependencyChange, "Bailed out due to dependency change") \
-  V(kCodeGenerationFailed, "Code generation failed")                        \
-  V(kFunctionBeingDebugged, "Function is being debugged")                   \
-  V(kGraphBuildingFailed, "Optimized graph construction failed")            \
-  V(kFunctionTooBig, "Function is too big to be optimized")                 \
-  V(kTooManyArguments, "Function contains a call with too many arguments")  \
-  V(kLiveEdit, "LiveEdit")                                                  \
-  V(kNativeFunctionLiteral, "Native function literal")                      \
-  V(kOptimizationDisabled, "Optimization disabled")                         \
-  V(kHigherTierAvailable, "A higher tier is already available")             \
+#define BAILOUT_MESSAGES_LIST(V)                                             \
+  V(kNoReason, "no reason")                                                  \
+                                                                             \
+  V(kBailedOutDueToDependencyChange, "Bailed out due to dependency change")  \
+  V(kConcurrentMapDeprecation, "Maps became deprecated during optimization") \
+  V(kCodeGenerationFailed, "Code generation failed")                         \
+  V(kFunctionBeingDebugged, "Function is being debugged")                    \
+  V(kGraphBuildingFailed, "Optimized graph construction failed")             \
+  V(kFunctionTooBig, "Function is too big to be optimized")                  \
+  V(kTooManyArguments, "Function contains a call with too many arguments")   \
+  V(kLiveEdit, "LiveEdit")                                                   \
+  V(kNativeFunctionLiteral, "Native function literal")                       \
+  V(kOptimizationDisabled, "Optimization disabled")                          \
+  V(kHigherTierAvailable, "A higher tier is already available")              \
+  V(kDetachedNativeContext, "The native context is detached")                \
   V(kNeverOptimize, "Optimization is always disabled")
 
 #define ERROR_MESSAGES_CONSTANTS(C, T) C,

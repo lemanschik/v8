@@ -30,7 +30,7 @@ bitfield struct MapBitFields3 extends uint32 {
   is_unstable: bool: 1 bit;
   is_migration_target: bool: 1 bit;
   is_extensible: bool: 1 bit;
-  may_have_interesting_symbols: bool: 1 bit;
+  may_have_interesting_properties: bool: 1 bit;
   construction_counter: int32: 3 bit;
 }
 
@@ -72,9 +72,9 @@ extern class Map extends HeapObject {
   constructor_or_back_pointer_or_native_context: Object;
   instance_descriptors: DescriptorArray;
   dependent_code: DependentCode;
-  prototype_validity_cell: Smi|Cell;
+  prototype_validity_cell: Zero|Cell;
   transitions_or_prototype_info: Map|Weak<Map>|TransitionArray|PrototypeInfo|
-      Smi;
+      Zero;
 }
 
 @export

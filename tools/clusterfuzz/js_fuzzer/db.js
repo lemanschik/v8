@@ -19,6 +19,10 @@ const globals = require('globals');
 const random = require('./random.js');
 const sourceHelpers = require('./source_helpers.js');
 
+// The probabiliy to choose a snippet with the super keyword in places
+// where it can be inserted.
+const CHOOSE_SUPER_PROB = 0.2;
+
 const globalIdentifiers = new Set(Object.keys(globals.builtin));
 const propertyNames = new Set([
     // Parsed from https://github.com/tc39/ecma262/blob/master/spec.html
@@ -307,6 +311,14 @@ class MutateDbWriter {
           return;
         }
 
+        if (path.parentPath.isMemberExpression() &&
+            path.parent.property == path.node &&
+            babelTypes.isIdentifier(path.parent.object) &&
+            globalIdentifiers.has(path.parent.object.name)) {
+          // Property access on a global name.
+          return;
+        }
+
         let binding = path.scope.getBinding(path.node.name);
         if (!binding) {
           // Unknown dependency. Don't handle this.
@@ -467,8 +479,8 @@ class MutateDb {
   getRandomStatement({canHaveSuper=false} = {}) {
     let choices;
     if (canHaveSuper) {
-      choices = random.randInt(0, 1) ?
-          this.index.all : this.index.superStatements;
+      choices = random.choose(CHOOSE_SUPER_PROB) ?
+          this.index.superStatements : this.index.all;
     } else {
       choices = this.index.statements;
     }

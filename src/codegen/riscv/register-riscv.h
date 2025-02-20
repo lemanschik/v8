@@ -31,7 +31,7 @@ namespace internal {
              V(a4)  V(a5)  V(a6)  V(a7)  V(t0)  \
              V(t1)  V(t2)  V(t4)  V(s7)  V(s8) V(s9) V(s10)
 
-#ifdef V8_COMPRESS_POINTERS_IN_SHARED_CAGE
+#ifdef V8_COMPRESS_POINTERS
 #define MAYBE_ALLOCATABLE_GENERAL_REGISTERS(V)
 #else
 #define MAYBE_ALLOCATABLE_GENERAL_REGISTERS(V) V(s11)
@@ -64,6 +64,7 @@ namespace internal {
   V(ft1)  V(ft2) V(ft3) V(ft4)  V(ft5) V(ft6) V(ft7) V(ft8)          \
   V(ft9)  V(ft10) V(ft11) V(fa0) V(fa1) V(fa2) V(fa3) V(fa4) V(fa5)  \
   V(fa6)  V(fa7)
+
 
 // Returns the number of padding slots needed for stack pointer alignment.
 constexpr int ArgumentPaddingSlots(int argument_count) {
@@ -253,12 +254,21 @@ VECTOR_REGISTERS(DECLARE_VECTOR_REGISTER)
 
 const VRegister no_msareg = VRegister::no_reg();
 
+// Assign |source| value to |no_reg| and return the |source|'s previous value.
+inline Register ReassignRegister(Register& source) {
+  Register result = source;
+  source = Register::no_reg();
+  return result;
+}
+
 // Register aliases.
 // cp is assumed to be a callee saved register.
 constexpr Register kRootRegister = s6;
 constexpr Register cp = s7;
 constexpr Register kScratchReg = s3;
 constexpr Register kScratchReg2 = s4;
+constexpr Register kStackPointerRegister = sp;
+constexpr Register padreg = t6;
 
 constexpr DoubleRegister kScratchDoubleReg = ft0;
 
@@ -271,6 +281,10 @@ DEFINE_REGISTER_NAMES(FPURegister, DOUBLE_REGISTERS)
 DEFINE_REGISTER_NAMES(VRegister, VECTOR_REGISTERS)
 
 // Give alias names to registers for calling conventions.
+constexpr Register kCArgRegs[] = {a0, a1, a2, a3, a4, a5, a6, a7};
+constexpr int kRegisterPassedArguments = arraysize(kCArgRegs);
+constexpr int kFPRegisterPassedArguments = 8;
+
 constexpr Register kReturnRegister0 = a0;
 constexpr Register kReturnRegister1 = a1;
 constexpr Register kReturnRegister2 = a2;
@@ -287,24 +301,35 @@ constexpr Register kJavaScriptCallCodeStartRegister = a2;
 constexpr Register kJavaScriptCallTargetRegister = kJSFunctionRegister;
 constexpr Register kJavaScriptCallNewTargetRegister = a3;
 constexpr Register kJavaScriptCallExtraArg1Register = a2;
+#ifdef V8_TARGET_ARCH_RISCV64
+constexpr Register kJavaScriptCallDispatchHandleRegister = a4;
+#else
+constexpr Register kJavaScriptCallDispatchHandleRegister = no_reg;
+#endif
 
-constexpr Register kOffHeapTrampolineRegister = t6;
 constexpr Register kRuntimeCallFunctionRegister = a1;
 constexpr Register kRuntimeCallArgCountRegister = a0;
 constexpr Register kRuntimeCallArgvRegister = a2;
-constexpr Register kWasmInstanceRegister = a0;
+constexpr Register kWasmImplicitArgRegister = a7;
 constexpr Register kWasmCompileLazyFuncIndexRegister = t0;
+constexpr Register kWasmTrapHandlerFaultAddressRegister = t6;
 
 constexpr DoubleRegister kFPReturnRegister0 = fa0;
+
+constexpr Register kSimulatorBreakArgument = t6;
+
+constexpr Register kMaglevFlagsRegister = t6;
+constexpr Register kMaglevExtraScratchRegister = t2;
+
 constexpr VRegister kSimd128ScratchReg = v24;
 constexpr VRegister kSimd128ScratchReg2 = v23;
 constexpr VRegister kSimd128ScratchReg3 = v8;
 constexpr VRegister kSimd128RegZero = v25;
 
-#ifdef V8_COMPRESS_POINTERS_IN_SHARED_CAGE
+#ifdef V8_COMPRESS_POINTERS
 constexpr Register kPtrComprCageBaseRegister = s11;  // callee save
 #else
-constexpr Register kPtrComprCageBaseRegister = kRootRegister;
+constexpr Register kPtrComprCageBaseRegister = no_reg;
 #endif
 
 }  // namespace internal

@@ -52,7 +52,9 @@ class V8_EXPORT_PRIVATE JSTypedLowering final
   Reduction ReduceJSOrdinaryHasInstance(Node* node);
   Reduction ReduceJSHasContextExtension(Node* node);
   Reduction ReduceJSLoadContext(Node* node);
+  Reduction ReduceJSLoadScriptContext(Node* node);
   Reduction ReduceJSStoreContext(Node* node);
+  Reduction ReduceJSStoreScriptContext(Node* node);
   Reduction ReduceJSLoadModule(Node* node);
   Reduction ReduceJSStoreModule(Node* node);
   Reduction ReduceJSEqual(Node* node);
@@ -61,6 +63,8 @@ class V8_EXPORT_PRIVATE JSTypedLowering final
   Reduction ReduceJSToName(Node* node);
   Reduction ReduceJSToNumberInput(Node* input);
   Reduction ReduceJSToNumber(Node* node);
+  Reduction ReduceJSToBigInt(Node* node);
+  Reduction ReduceJSToBigIntConvertNumber(Node* node);
   Reduction ReduceJSToNumeric(Node* node);
   Reduction ReduceJSToStringInput(Node* input);
   Reduction ReduceJSToString(Node* node);
@@ -87,6 +91,14 @@ class V8_EXPORT_PRIVATE JSTypedLowering final
 
   // Helper for ReduceJSLoadModule and ReduceJSStoreModule.
   Node* BuildGetModuleCell(Node* node);
+
+  // Helpers for ReduceJSAdd.
+  Reduction GenerateStringAddition(Node* node, Node* left, Node* right,
+                                   Node* context, Node* frame_state,
+                                   Node** effect, Node** control,
+                                   bool should_create_cons_string);
+  Node* UnwrapStringWrapper(Node* string_or_wrapper, Node** effect,
+                            Node** control);
 
   Factory* factory() const;
   Graph* graph() const;

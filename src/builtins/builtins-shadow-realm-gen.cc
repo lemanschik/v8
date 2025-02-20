@@ -4,13 +4,15 @@
 
 #include "src/builtins/builtins-utils-gen.h"
 #include "src/builtins/builtins.h"
-#include "src/codegen/code-stub-assembler.h"
+#include "src/codegen/code-stub-assembler-inl.h"
 #include "src/objects/descriptor-array.h"
 #include "src/objects/js-shadow-realm.h"
 #include "src/objects/module.h"
 
 namespace v8 {
 namespace internal {
+
+#include "src/codegen/define-code-stub-assembler-macros.inc"
 
 class ShadowRealmBuiltinsAssembler : public CodeStubAssembler {
  public:
@@ -38,6 +40,9 @@ class ShadowRealmBuiltinsAssembler : public CodeStubAssembler {
   TNode<JSFunction> AllocateImportValueFulfilledFunction(
       TNode<NativeContext> caller_context, TNode<NativeContext> eval_context,
       TNode<String> specifier, TNode<String> export_name);
+  void ShadowRealmThrow(TNode<Context> context,
+                        MessageTemplate fallback_message,
+                        TNode<Object> exception);
 };
 
 TNode<JSObject> ShadowRealmBuiltinsAssembler::AllocateJSWrappedFunction(
@@ -78,13 +83,9 @@ ShadowRealmBuiltinsAssembler::AllocateImportValueFulfilledFunction(
   const TNode<Context> function_context =
       CreateImportValueFulfilledFunctionContext(caller_context, eval_context,
                                                 specifier, export_name);
-  const TNode<Map> function_map = CAST(LoadContextElement(
-      caller_context, Context::STRICT_FUNCTION_WITHOUT_PROTOTYPE_MAP_INDEX));
-  const TNode<SharedFunctionInfo> info =
-      ShadowRealmImportValueFulfilledSFIConstant();
-
-  return AllocateFunctionWithMapAndContext(function_map, info,
-                                           function_context);
+  return AllocateRootFunctionWithContext(
+      RootIndex::kShadowRealmImportValueFulfilledSharedFun, function_context,
+      {});
 }
 
 void ShadowRealmBuiltinsAssembler::CheckAccessor(TNode<DescriptorArray> array,
@@ -95,6 +96,14 @@ void ShadowRealmBuiltinsAssembler::CheckAccessor(TNode<DescriptorArray> array,
   GotoIfNot(TaggedEqual(key, name), bailout);
   TNode<Object> value = LoadValueByDescriptorEntry(array, index);
   GotoIfNot(IsAccessorInfo(CAST(value)), bailout);
+}
+
+void ShadowRealmBuiltinsAssembler::ShadowRealmThrow(
+    TNode<Context> context, MessageTemplate fallback_message,
+    TNode<Object> exception) {
+  TNode<Smi> template_index = SmiConstant(static_cast<int>(fallback_message));
+  CallRuntime(Runtime::kShadowRealmThrow, context, template_index, exception);
+  Unreachable();
 }
 
 // https://tc39.es/proposal-shadowrealm/#sec-getwrappedvalue
@@ -109,7 +118,7 @@ TF_BUILTIN(ShadowRealmGetWrappedValue, ShadowRealmBuiltinsAssembler) {
 
   // 2. Return value.
   GotoIf(TaggedIsSmi(value), &if_primitive);
-  GotoIfNot(IsJSReceiver(CAST(value)), &if_primitive);
+  GotoIfNot(JSAnyIsNotPrimitive(CAST(value)), &if_primitive);
 
   // 1. If Type(value) is Object, then
   // 1a. If IsCallable(value) is false, throw a TypeError exception.
@@ -259,7 +268,7 @@ TF_BUILTIN(CallWrappedFunction, ShadowRealmBuiltinsAssembler) {
         StoreFixedArrayElement(
             wrapped_args, IntPtrAdd(index, IntPtrConstant(1)), wrapped_value);
       },
-      1, IndexAdvanceMode::kPost);
+      1, LoopUnrollingMode::kNo, IndexAdvanceMode::kPost);
 
   TVARIABLE(Object, var_exception);
   TNode<Object> result;
@@ -267,29 +276,25 @@ TF_BUILTIN(CallWrappedFunction, ShadowRealmBuiltinsAssembler) {
     compiler::ScopedExceptionHandler handler(this, &call_exception,
                                              &var_exception);
     TNode<Int32T> args_count = Int32Constant(0);  // args already on the stack
-    Callable callable = CodeFactory::CallVarargs(isolate());
 
     // 9. Let result be the Completion Record of Call(target,
     // wrappedThisArgument, wrappedArgs).
-    result = CallStub(callable, target_context, target, args_count, argc,
-                      wrapped_args);
+    result = CallBuiltin(Builtin::kCallVarargs, target_context, target,
+                         args_count, argc, wrapped_args);
   }
 
   // 10. If result.[[Type]] is normal or result.[[Type]] is return, then
   // 10a. Return ? GetWrappedValue(callerRealm, result.[[Value]]).
-  TNode<Object> wrapped_result =
-      CallBuiltin(Builtin::kShadowRealmGetWrappedValue, caller_context,
-                  caller_context, target_context, result);
+  TNode<JSAny> wrapped_result =
+      CallBuiltin<JSAny>(Builtin::kShadowRealmGetWrappedValue, caller_context,
+                         caller_context, target_context, result);
   args.PopAndReturn(wrapped_result);
 
   // 11. Else,
   BIND(&call_exception);
   // 11a. Throw a TypeError exception.
-  // TODO(v8:11989): provide a non-observable inspection on the
-  // pending_exception to the newly created TypeError.
-  // https://github.com/tc39/proposal-shadowrealm/issues/353
-  ThrowTypeError(context, MessageTemplate::kCallShadowRealmFunctionThrown,
-                 var_exception.value());
+  ShadowRealmThrow(context, MessageTemplate::kCallWrappedFunctionThrew,
+                   var_exception.value());
 
   BIND(&target_not_callable);
   // A wrapped value should not be non-callable.
@@ -416,11 +421,12 @@ TF_BUILTIN(ShadowRealmImportValueFulfilled, ShadowRealmBuiltinsAssembler) {
 
 TF_BUILTIN(ShadowRealmImportValueRejected, ShadowRealmBuiltinsAssembler) {
   TNode<Context> context = Parameter<Context>(Descriptor::kContext);
-  // TODO(v8:11989): provide a non-observable inspection on the
-  // pending_exception to the newly created TypeError.
-  // https://github.com/tc39/proposal-shadowrealm/issues/353
-  ThrowTypeError(context, MessageTemplate::kImportShadowRealmRejected);
+  TNode<Object> exception = Parameter<Object>(Descriptor::kException);
+  ShadowRealmThrow(context, MessageTemplate::kImportShadowRealmRejected,
+                   exception);
 }
+
+#include "src/codegen/undef-code-stub-assembler-macros.inc"
 
 }  // namespace internal
 }  // namespace v8

@@ -16,9 +16,14 @@ namespace internal {
 class EntryFrameConstants : public AllStatic {
  public:
   // Need to take constant pool into account.
-  static constexpr int kCallerFPOffset = V8_EMBEDDED_CONSTANT_POOL_BOOL
-                                             ? -4 * kSystemPointerSize
-                                             : -3 * kSystemPointerSize;
+  static constexpr int kNextExitFrameFPOffset = V8_EMBEDDED_CONSTANT_POOL_BOOL
+                                                    ? -4 * kSystemPointerSize
+                                                    : -3 * kSystemPointerSize;
+
+  static constexpr int kNextFastCallFrameFPOffset =
+      kNextExitFrameFPOffset - kSystemPointerSize;
+  static constexpr int kNextFastCallFramePCOffset =
+      kNextFastCallFrameFPOffset - kSystemPointerSize;
 };
 
 class WasmLiftoffSetupFrameConstants : public TypedFrameConstants {
@@ -31,15 +36,24 @@ class WasmLiftoffSetupFrameConstants : public TypedFrameConstants {
   static constexpr int kInstanceSpillOffset =
       TYPED_FRAME_PUSHED_VALUE_OFFSET(1);
 
+  // Spilled registers are implicitly sorted backwards by number.
   static constexpr int kParameterSpillsOffset[] = {
-      TYPED_FRAME_PUSHED_VALUE_OFFSET(2), TYPED_FRAME_PUSHED_VALUE_OFFSET(3),
-      TYPED_FRAME_PUSHED_VALUE_OFFSET(4), TYPED_FRAME_PUSHED_VALUE_OFFSET(5),
-      TYPED_FRAME_PUSHED_VALUE_OFFSET(6), TYPED_FRAME_PUSHED_VALUE_OFFSET(7)};
+      TYPED_FRAME_PUSHED_VALUE_OFFSET(7), TYPED_FRAME_PUSHED_VALUE_OFFSET(6),
+      TYPED_FRAME_PUSHED_VALUE_OFFSET(5), TYPED_FRAME_PUSHED_VALUE_OFFSET(4),
+      TYPED_FRAME_PUSHED_VALUE_OFFSET(3), TYPED_FRAME_PUSHED_VALUE_OFFSET(2)};
 
   // SP-relative.
-  static constexpr int kWasmInstanceOffset = 2 * kSystemPointerSize;
+  static constexpr int kWasmInstanceDataOffset = 2 * kSystemPointerSize;
   static constexpr int kDeclaredFunctionIndexOffset = 1 * kSystemPointerSize;
   static constexpr int kNativeModuleOffset = 0;
+};
+
+class WasmLiftoffFrameConstants : public TypedFrameConstants {
+ public:
+  static constexpr int kFeedbackVectorOffset =
+      (V8_EMBEDDED_CONSTANT_POOL_BOOL ? 4 : 3) * kSystemPointerSize;
+  static constexpr int32_t kInstanceDataOffset =
+      (V8_EMBEDDED_CONSTANT_POOL_BOOL ? 3 : 2) * kSystemPointerSize;
 };
 
 // Frame constructed by the {WasmDebugBreak} builtin.

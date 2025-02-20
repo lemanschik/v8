@@ -18,9 +18,9 @@ namespace internal {
 
 #include "torque-generated/src/objects/js-struct-tq-inl.inc"
 
-TQ_OBJECT_CONSTRUCTORS_IMPL(JSSharedStruct)
+TQ_OBJECT_CONSTRUCTORS_IMPL(AlwaysSharedSpaceJSObject)
 
-CAST_ACCESSOR(JSSharedStruct)
+TQ_OBJECT_CONSTRUCTORS_IMPL(JSSharedStruct)
 
 }  // namespace internal
 }  // namespace v8

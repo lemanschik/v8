@@ -54,31 +54,41 @@ static inline constexpr bool needs_fp_reg_pair(ValueKind kind) {
 }
 
 static inline constexpr RegClass reg_class_for(ValueKind kind) {
-  switch (kind) {
-    case kF32:
-    case kF64:
-      return kFpReg;
-    case kI8:
-    case kI16:
-    case kI32:
-      return kGpReg;
-    case kI64:
-      return kNeedI64RegPair ? kGpRegPair : kGpReg;
-    case kS128:
-      return kNeedS128RegPair ? kFpRegPair : kFpReg;
-    case kRef:
-    case kRefNull:
-    case kRtt:
-      return kGpReg;
-    default:
-      return kNoReg;  // unsupported kind
-  }
+  // Statically generate an array that we use for lookup at runtime.
+  constexpr size_t kNumValueKinds = static_cast<size_t>(kTop);
+  constexpr auto kRegClasses =
+      base::make_array<kNumValueKinds>([](std::size_t kind) {
+        switch (kind) {
+          case kF16:
+          case kF32:
+          case kF64:
+            return kFpReg;
+          case kI8:
+          case kI16:
+          case kI32:
+            return kGpReg;
+          case kI64:
+            return kNeedI64RegPair ? kGpRegPair : kGpReg;
+          case kS128:
+            return kNeedS128RegPair ? kFpRegPair : kFpReg;
+          case kRef:
+          case kRefNull:
+            return kGpReg;
+          case kVoid:
+            return kNoReg;  // unsupported kind
+        }
+        CONSTEXPR_UNREACHABLE();
+      });
+  V8_ASSUME(kind < kNumValueKinds);
+  RegClass rc = kRegClasses[kind];
+  V8_ASSUME(rc != kNoReg);
+  return rc;
 }
 
 // Description of LiftoffRegister code encoding.
 // This example uses the ARM architecture, which as of writing has:
 // - 9 GP registers, requiring 4 bits
-// - 13 FP regitsters, requiring 5 bits
+// - 13 FP registers, requiring 5 bits
 // - kNeedI64RegPair is true
 // - kNeedS128RegPair is true
 // - thus, kBitsPerRegPair is 2 + 2 * 4 = 10
@@ -157,6 +167,16 @@ class LiftoffRegister {
     DCHECK(kLiftoffAssemblerFpCacheRegs.has(reg));
     DCHECK_EQ(reg, fp());
   }
+
+#if defined(V8_TARGET_ARCH_IA32)
+  // IA32 needs a fixed xmm0 register as a LiftoffRegister, however, xmm0 is not
+  // an allocatable double register (see register-ia32.h). This constructor
+  // allows bypassing the DCHECK that the LiftoffRegister has to be allocatable.
+  static LiftoffRegister from_uncached(DoubleRegister reg) {
+    DCHECK(!kLiftoffAssemblerFpCacheRegs.has(reg));
+    return LiftoffRegister(kAfterMaxLiftoffGpRegCode + reg.code());
+  }
+#endif
 
   static LiftoffRegister from_liftoff_code(int code) {
     LiftoffRegister reg{static_cast<storage_t>(code)};
@@ -351,12 +371,13 @@ class LiftoffRegList {
 
   // Allow to construct LiftoffRegList from a number of
   // {Register|DoubleRegister|LiftoffRegister}.
-  template <
-      typename... Regs,
-      typename = std::enable_if_t<std::conjunction_v<std::disjunction<
-          std::is_same<Register, Regs>, std::is_same<DoubleRegister, Regs>,
-          std::is_same<LiftoffRegister, Regs>>...>>>
-  constexpr explicit LiftoffRegList(Regs... regs) {
+  template <typename... Regs>
+  constexpr explicit LiftoffRegList(Regs... regs)
+    requires(
+        std::conjunction_v<std::disjunction<
+            std::is_same<Register, Regs>, std::is_same<DoubleRegister, Regs>,
+            std::is_same<LiftoffRegister, Regs>>...>)
+  {
     (..., set(regs));
   }
 
@@ -413,8 +434,18 @@ class LiftoffRegList {
     return LiftoffRegList(regs_ & other.regs_);
   }
 
+  constexpr LiftoffRegList& operator&=(const LiftoffRegList other) {
+    regs_ &= other.regs_;
+    return *this;
+  }
+
   constexpr LiftoffRegList operator|(const LiftoffRegList other) const {
     return LiftoffRegList(regs_ | other.regs_);
+  }
+
+  constexpr LiftoffRegList& operator|=(const LiftoffRegList other) {
+    regs_ |= other.regs_;
+    return *this;
   }
 
   constexpr LiftoffRegList GetAdjacentFpRegsSet() const {
@@ -446,13 +477,13 @@ class LiftoffRegList {
   }
 
   LiftoffRegister GetFirstRegSet() const {
-    DCHECK(!is_empty());
+    V8_ASSUME(regs_ != 0);
     int first_code = base::bits::CountTrailingZeros(regs_);
     return LiftoffRegister::from_liftoff_code(first_code);
   }
 
   LiftoffRegister GetLastRegSet() const {
-    DCHECK(!is_empty());
+    V8_ASSUME(regs_ != 0);
     int last_code =
         8 * sizeof(regs_) - 1 - base::bits::CountLeadingZeros(regs_);
     return LiftoffRegister::from_liftoff_code(last_code);
@@ -526,7 +557,10 @@ LiftoffRegList::Iterator LiftoffRegList::end() const {
 }
 
 static constexpr LiftoffRegList GetCacheRegList(RegClass rc) {
-  return rc == kFpReg ? kFpCacheRegList : kGpCacheRegList;
+  V8_ASSUME(rc == kFpReg || rc == kGpReg);
+  static_assert(kGpReg == 0 && kFpReg == 1);
+  constexpr LiftoffRegList kRegLists[2]{kGpCacheRegList, kFpCacheRegList};
+  return kRegLists[rc];
 }
 
 inline std::ostream& operator<<(std::ostream& os, LiftoffRegList reglist) {
